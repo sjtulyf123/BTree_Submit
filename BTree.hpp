@@ -6,6 +6,7 @@
 #include <functional>
 #include <cstddef>
 #include <fstream>
+#include <iostream>
 #include <cstring>
 #include "exception.hpp"
 #define offset_type long
