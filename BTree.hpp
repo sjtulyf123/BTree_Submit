@@ -1,823 +1,672 @@
-//
-// Created by 郑文鑫 on 2019-03-09.
-//
+# include "utility.hpp"
+# include <fstream>
+# include <functional>
+# include <cstddef>
+# include "exception.hpp"
 
-#include "utility.hpp"
-#include <functional>
-#include <cstddef>
-#include <fstream>
-#include <iostream>
-#include <cstring>
-#include "exception.hpp"
-#define offset_type long
-const int blocksize=4096;
 namespace sjtu {
-template <class Key, class Value, class Compare = std::less<Key> >
-class BTree {
- public:
-    class iterator;
-    class const_iterator;
 
- private:
- const static int M=blocksize/(sizeof(long)+sizeof(Key));
- const static int L=blocksize/sizeof(Value);
- const static int off=0;
- struct save{
-  size_t num_of_data;
-  offset_type root;//树根
-  offset_type first_leaf;//第一个叶子
-  offset_type last_leaf;//最后一个叶子
-  offset_type eend;//文件的末尾
-  save()
-  {
-   num_of_data=0;
-   root=0;
-   first_leaf=0;
-   last_leaf=0;
-   eend=0;
-  }
-  }saving;//树的信息
+    template <class Key, class Value, class Compare = std::less<Key> >
+    class BTree {
+    public:
+        typedef pair <Key, Value> value_type;
+        typedef ssize_t offset_type;
+        class iterator;
+        class const_iterator;
 
- struct index_t{
-   Key key;
-   offset_type offset;
-   index_t(){offset=0;}
- };
+    private:
+        static const int M = 1000; //非叶子结点的长度
+        static const int L = 200;  //叶子结点的长度
+        static const int off = 0;//saving的偏移量
 
- struct internal_node{
-   offset_type offset;
-   offset_type father;
-   int now_size;
-   bool type;//type为1时表示它的儿子是叶子结点
-   index_t data[M+1];
-   internal_node()
-   {
-     offset=father=0;
-     now_size=0;
-     type=false;
-   }
- };//内部节点
 
- struct record_t
- {
-   Key key;
-   Value value;
- };
-
- struct leaf_node{
-   offset_type offset;
-   offset_type father;
-   offset_type next;
-   offset_type prev;
-   int now_size;
-   record_t data[L+1];
-   leaf_node()
-   {
-     offset=next=prev=father=0;
-     now_size=0;
-   }
- };//叶子结点
- std::fstream ffile;
- //int open_cnt;
- bool is_open;
- bool exists;
-
-   inline void open_file()
-   {
-     exists=1;
-     if(is_open==0)
-     {
-       ffile.open("bpt",std::ios::binary);
-       if(!ffile) throw invalid_iterator();
-       else
-           read_index(off,sizeof(save));
-       is_open=1;
-     }
-   }
-
-   inline char * read_index(offset_type offset,size_t siz)
-   {
-       ffile.seekg(offset,std::ios::beg);
-       char *buffer=new char [blocksize];
-       ffile.read(reinterpret_cast<int>(buffer),siz);
-       return buffer;
-   }
-    inline char * read_leaf(offset_type offset,size_t siz)
-    {
-        ffile.seekg(offset,std::ios::beg);
-        char *buffer=new char [blocksize];
-        ffile.read(reinterpret_cast<int>(buffer),siz);
-        return buffer;
-    }
-
-   inline void close_file()
-   {
-       if(is_open==1)
-       {
-           ffile.close("bpt");
-           is_open=0;
-       }
-   }
-
-   inline void write_index(offset_type offset,size_t siz,internal_node *node) const
-   {
-       ffile.seekp(offset,std::ios::beg);
-       ffile.write(reinterpret_cast<char*>(node),siz);
-   }
-
-   inline void write_leaf(offset_type offset,size_t siz,leaf_node leaf) const
-   {
-       ffile.seekp(offset,std::ios::beg);
-       ffile.write(reinterpret_cast<int>(*leaf),siz);
-   }
-
-   inline void build_bpt()
-   {
-       saving.num_of_data=0;
-       saving.eend=sizeof(save);
-       internal_node root;
-       leaf_node leaf;
-       saving.eend=saving.root=root.offset;
-       saving.eend+=sizeof(internal_node);
-       saving.first_leaf=saving.last_leaf=leaf.offset=saving.eend;
-       saving.eend+=sizeof(leaf_node);
-       root.father=0;
-       root.now_size=1;
-       root.type=1;
-       root.data[0].offset=leaf.offset;
-       leaf.next=leaf.prev=0;
-       leaf.father=root.offset;
-       leaf.now_size=0;
-       write_index(off,sizeof(save),saving);
-       write_index(root.offset,sizeof(internal_node),root);
-       write_leaf(leaf.offset,sizeof(leaf_node),leaf);
-   }
-
-   offset_type find_location(const Key &key,offset_type offset)
-   {
-       internal_node node;
-       node = read_index(offset, sizeof(internal_node));
-       if (node.type == 1)//孩子是叶子结点
-       {
-           int pos;
-           for (pos = 0; pos < node.now_size; ++pos)
-           {if (key < node.data[pos].key) break;}
-
-           if (pos == 0) return 0;
-           else return node.data[pos - 1].offset;
-       } else {
-           int pos;
-           for (pos = 0; pos < node.now_size; ++pos)
-               if (key < node.data[pos]) break;
-           if (pos == 0) return 0;
-           return find_location(key, node.data[pos - 1].offset);//递归查找
-       }
-   }
-
-  // Your private members go here
- public:
-  typedef pair<const Key, Value> value_type;
-
-  class iterator {
-      friend class BTree;
-   private:
-    // Your private members go here
-    offset_type offset;//偏移量
-    int position;//在节点中的位置
-    BTree *what_tree;
-   public:
-    bool modify(const Key& key){
-      return true;
-      ////这函数是啥
-    }
-    iterator() {
-        offset=position=0;
-        what_tree= nullptr;
-    }
-
-    iterator(BTree *x,offset_type offs=0,int p=0)
-    {
-        what_tree=x;
-        offset=offs;
-        position=p;
-    }
-    iterator(const iterator& other) {
-      what_tree=other.what_tree;
-      position=other.position;
-      offset=other.offset;
-    }
-    // Return a new iterator which points to the n-next elements
-    iterator operator++(int) {
-      iterator tmp=*this;
-      if(*this==what_tree->end())//最后一个数据了，++没有意义了吧
-      {
-          what_tree= nullptr;
-          offset=0;
-          position=0;
-          return tmp;
-      }
-      else
-      {
-          leaf_node it_leaf;
-          it_leaf=what_tree->read_leaf(offset,sizeof(leaf_node));
-          if(position==it_leaf.now_size-1)//最后一个结点
-          {
-              if(it_leaf.next!=0)//保证后面有结点
-              {
-                  offset=it_leaf.next;
-                  position=0;
-              }
-              else position++;
-          }
-          else
-              position++;
-          return tmp;
-      }
-    }
-    iterator& operator++() {
-        if(*this==what_tree->end())//最后一个数据了，++没有意义了吧
-        {
-            what_tree= nullptr;
-            offset=0;
-            position=0;
-            return *this;
-        }
-        else
-        {
-            leaf_node it_leaf;
-            it_leaf=what_tree->read_leaf(offset,sizeof(leaf_node));
-            if(position==it_leaf.now_size-1)//最后一个结点
-            {
-                if(it_leaf.next!=0)//保证后面有结点
-                {
-                    offset=it_leaf.next;
-                    position=0;
-                }
-                else position++;
+        struct savee {
+            offset_type first_leaf;          // 第一个节点
+            offset_type last_leaf;          //最后一个
+            offset_type root;          //树根啊
+            size_t size;          // 总共的个数
+            offset_type eend;         // end
+            savee() {
+                first_leaf = 0;
+                last_leaf = 0;
+                root = 0;
+                size = 0;
+                eend= 0;
             }
-            else
-                position++;
-            return *this;
-        }
-    }
-    iterator operator--(int) {
-      iterator tmp=*this;
-      if(*this==what_tree->begin())//第一个数据
-      {
-          what_tree= nullptr;
-          offset=0;
-          position=0;
-          return tmp;
-      }
-      else
-      {
-          leaf_node tmp_leaf;
-          tmp_leaf=what_tree->read_leaf(offset,sizeof(leaf_node));
-          if(position==0)//节点的第一个数据
-          {
-              offset=tmp_leaf.prev;
-              if(offset==0)////////////////
-                  position--;
-              else{leaf_node q;
-              q=what_tree->read_leaf(tmp_leaf.prev,sizeof(leaf_node));
-              position=q.now_size-1;}
-          }
-          else//正常情况
-              position--;
+        };
+        savee saving;//储存树的信息
+        struct internalNode {
+            offset_type offset;      	// 偏移量
+            offset_type father;           	// 父亲
+            offset_type data[M + 1];     	// 若干孩子
+            Key key[M + 1];   	// 关键字
+            int cnt;              	// 数据个数
+            bool type;            	// bool为1——下面就是叶子。0——下面还是非叶子
+            internalNode() {
+                offset = 0,father = 0;
+                for (int i = 0; i <= M; ++i) data[i] = 0;
+                cnt = 0;
+                type = 0;
+            }
+        };
+        struct leafNode {
+            offset_type offset;          // 偏移量
+            offset_type father;               // 父亲
+            offset_type pre, nxt;
+            int cnt;                  // 多少个数据
+            value_type data[L + 1];   // 数据
+            leafNode() {
+                offset = 0;
+                father = 0;
+                pre = 0;
+                nxt = 0;
+                cnt = 0;
+            }
+        };
+        FILE *fp;
+        bool fp_open;
+        bool file_already_exists;
 
-          return tmp;
-      }
-
-    }
-    iterator& operator--() {
-        if(*this==what_tree->begin())//第一个数据
-        {
-            what_tree= nullptr;
-            offset=0;
-            position=0;
-            return *this;
+        inline void openFile() {
+            file_already_exists = 1;
+            if (fp_open == 0) {
+                fp = fopen("bpt.txt", "rb+");
+                if (fp == nullptr) {
+                    file_already_exists = 0;
+                    fp = fopen("bpt.txt", "w");
+                    fclose(fp);
+                    fp = fopen("bpt.txt", "rb+");
+                } else read_file(&saving, off, 1, sizeof(savee));
+                fp_open = 1;
+            }
         }
-        else {
-            leaf_node tmp_leaf;
-            tmp_leaf = what_tree->read_leaf(offset, sizeof(leaf_node));
-            if (position == 0)//节点的第一个数据
-            {
-                offset = tmp_leaf.prev;
-                if (offset == 0)/////////////////
-                    position--;
-                else {
-                    leaf_node q;
-                    q = what_tree->read_leaf(tmp_leaf.prev, sizeof(leaf_node));
-                    position = q.now_size - 1;
+
+        inline void read_file(void *ff, offset_type offset, size_t num, size_t size) const {
+            if (fseek(fp, offset, SEEK_SET)) throw "failed!stupid!";
+            fread(ff, size, num, fp);
+        }
+
+        inline void closeFile() {
+            if (fp_open == 1) {
+                fclose(fp);
+                fp_open = 0;
+            }
+        }
+
+        inline void write_file(void *ff, offset_type offset, size_t num, size_t size) const {
+            if (fseek(fp, offset, SEEK_SET)) throw "failed!rubbish!";
+            fwrite(ff, size, num, fp);
+        }
+
+         void build_bpt() {
+            saving.size = 0;
+            saving. eend = sizeof(savee);
+            internalNode root;
+            leafNode new_leaf;
+            saving.root = root.offset = saving. eend;
+            saving. eend += sizeof(internalNode);
+            saving.first_leaf = saving.last_leaf = new_leaf.offset = saving. eend;
+            saving. eend += sizeof(leafNode);
+            root.type = 1;
+            root.father = 0;
+            root.cnt = 1;
+            new_leaf.father = root.offset;
+            root.data[0] = new_leaf.offset;
+            new_leaf.nxt = new_leaf.pre = 0;
+            new_leaf.cnt = 0;
+            write_file(&saving, off, 1, sizeof(savee));
+            write_file(&root, root.offset, 1, sizeof(internalNode));
+            write_file(&new_leaf, new_leaf.offset, 1, sizeof(leafNode));
+        }
+
+        offset_type find_location(const Key &key, offset_type offset) {
+            internalNode node;
+            read_file(&node, offset, 1, sizeof(internalNode));
+            if(node.type == 1) {//孩子是叶子节点
+                int pos ;
+                for (pos=0; pos < node.cnt; ++pos)
+                    if (key < node.key[pos]) break;
+                if (pos == 0) return 0;
+                return node.data[pos - 1];
+            } else {
+                int pos;
+                for (pos=0; pos < node.cnt; ++pos)
+                    if (key < node.key[pos]) break;
+                if (pos == 0) return 0;
+                return find_location(key, node.data[pos - 1]);//递归查找
+            }
+        }
+
+
+        pair <iterator, OperationResult> insert_leaf(leafNode &current_leaf, const Key &key, const Value &value) {
+
+            int pos ;
+            for (pos=0; pos < current_leaf.cnt; ++pos) {
+                if (key == current_leaf.data[pos].first)
+                    return pair <iterator, OperationResult> (iterator(nullptr), Fail);			// there are elements with the same key
+                if (key < current_leaf.data[pos].first)
+                    break;
+            }//找到添加的位置
+            for (int i = current_leaf.cnt - 1; i >= pos; --i)
+            { current_leaf.data[i+1].first =current_leaf.data[i].first;
+              current_leaf.data[i+1].second = current_leaf.data[i].second;
+            }
+            current_leaf.data[pos].first = key;
+            current_leaf.data[pos].second = value;
+            ++current_leaf.cnt;
+            ++saving.size;
+
+            iterator it;
+            it.what_tree = this;
+            it. position = pos;
+            it.offset = current_leaf.offset;
+            write_file(&saving, off, 1, sizeof(savee));
+            if(current_leaf.cnt <= L) write_file(&current_leaf, current_leaf.offset, 1, sizeof(leafNode));
+            else split_leaf(current_leaf, it, key);
+            return pair <iterator, OperationResult> (it, Success);
+        }
+
+
+        void insert_node(internalNode &current_node, const Key &key, offset_type ch) {
+            int pos ;
+            for (pos=0; pos < current_node.cnt; ++pos)
+                if (key < current_node.key[pos]) break;
+            for (int i = current_node.cnt - 1; i >= pos; --i)
+                current_node.key[i+1] = current_node.key[i];
+            for (int i = current_node.cnt - 1; i >= pos; --i)
+                current_node.data[i+1] =current_node.data[i];
+            current_node.key[pos] = key;
+            current_node.data[pos] = ch;
+            ++current_node.cnt;
+            if(current_node.cnt <= M)
+                write_file(&current_node, current_node.offset, 1, sizeof(internalNode));
+            else split_node(current_node);
+        }
+
+
+        void split_leaf(leafNode &current_leaf, iterator &it, const Key &key) {
+            leafNode newleaf;
+            newleaf.cnt = current_leaf.cnt - (current_leaf.cnt /2);
+            current_leaf.cnt =current_leaf.cnt/2;
+            newleaf.offset = saving. eend;
+            saving. eend += sizeof(leafNode);
+            newleaf.father =current_leaf.father;
+            //move
+            for (int i=0; i<newleaf.cnt; ++i) {
+                newleaf.data[i].first = current_leaf.data[i +current_leaf.cnt].first;
+                newleaf.data[i].second = current_leaf.data[i + current_leaf.cnt].second;
+                if(newleaf.data[i].first == key) {
+                    it.offset = newleaf.offset;
+                    it. position = i;
                 }
-            } else//正常情况
-                position--;
+            }
+            // 新结点和之前的 结点连接
+            newleaf.nxt = current_leaf.nxt;
+            newleaf.pre = current_leaf.offset;
+            current_leaf.nxt = newleaf.offset;
 
-            return *this;
+            leafNode next_leaf;
+            if(newleaf.nxt == 0) saving.last_leaf = newleaf.offset;
+            else {//后面还有叶子，更新后面的
+                read_file(&next_leaf, newleaf.nxt, 1, sizeof(leafNode));
+                next_leaf.pre = newleaf.offset;
+                write_file(&next_leaf, next_leaf.offset, 1, sizeof(leafNode));
+            }
+            //写入
+
+            write_file(&current_leaf, current_leaf.offset, 1, sizeof(leafNode));
+            write_file(&newleaf, newleaf.offset, 1, sizeof(leafNode));
+            write_file(&saving, off, 1, sizeof(savee));
+
+            // 更新父亲
+            internalNode father_node;
+            read_file(&father_node, current_leaf.father, 1, sizeof(internalNode));
+            insert_node(father_node, newleaf.data[0].first, newleaf.offset);
         }
-    }
-    // Overloaded of operator '==' and '!='
-    // Check whether the iterators are same
-    value_type& operator*() const {////////////??????
-      // Todo operator*, return the <K,V> of iterator
-      leaf_node tmp;
-      tmp=what_tree->read_leaf(offset,sizeof(leaf_node));
-      return tmp.data[position].value;
-    }
-    bool operator==(const iterator& rhs) const {
-      return (position==rhs.position&&offset==rhs.offset&&what_tree==rhs.what_tree);
-    }
-    bool operator==(const const_iterator& rhs) const {
-        return (position==rhs.position&&offset==rhs.offset&&what_tree==rhs.what_tree);
-    }
-    bool operator!=(const iterator& rhs) const {
-        return (position!=rhs.position||offset!=rhs.offset||what_tree!=rhs.what_tree);
-    }
-    bool operator!=(const const_iterator& rhs) const {
-        return (position!=rhs.position||offset!=rhs.offset||what_tree!=rhs.what_tree);
-    }
-    value_type* operator->() const noexcept {
-      /**
-       * for the support of it->first.
-       * See
-       * <http://kelvinh.github.io/blog/2013/11/20/overloading-of-member-access-operator-dash-greater-than-symbol-in-cpp/>
-       * for help.
-       */
-       //要干啥？
-    }
-  };
-  class const_iterator {
-      friend class BTree;
-    // it should has similar member method as iterator.
-    //  and it should be able to construct from an iterator.
-   private:
-    // Your private members go here
-    BTree *what_tree;
-    offset_type offset;
-    int position;
-   public:
-    const_iterator() {
-      // TODO
-      position=0;
-      offset=0;
-      what_tree= nullptr;
-    }
-    const_iterator(BTree *x,offset_type offs,int p)
-    {
-        what_tree=x;
-        offset=offs;
-        position=p;
-    }
-    const_iterator(const const_iterator& other) {
-      // todo
-      what_tree=other.what_tree;
-      position=other.position;
-      offset=other.offset;
-    }
-    const_iterator(const iterator& other) {
-      // TODO
-        what_tree=other.what_tree;
-        position=other.position;
-        offset=other.offset;
-    }
-    const_iterator operator++(int) {
-          const_iterator tmp=*this;
-          if(*this==what_tree->cend())//最后一个数据了，++没有意义了吧
-          {
-              what_tree= nullptr;
-              offset=0;
-              position=0;
-              return tmp;
-          }
-          else
-          {
-              leaf_node it_leaf;
-              it_leaf=what_tree->read_leaf(offset,sizeof(leaf_node));
-              if(position==it_leaf.now_size-1)//最后一个结点
-              {
-                  if(it_leaf.next!=0)//保证后面有结点
-                  {
-                      offset=it_leaf.next;
-                      position=0;
-                  }
-                  else position++;
-              }
-              else
-                  position++;
-              return tmp;
-          }
-      }
-      const_iterator& operator++() {
-          if(*this==what_tree->cend())//最后一个数据了，++没有意义了吧
-          {
-              what_tree= nullptr;
-              offset=0;
-              position=0;
-              return *this;
-          }
-          else
-          {
-              leaf_node it_leaf;
-              it_leaf=what_tree->read_leaf(offset,sizeof(leaf_node));
-              if(position==it_leaf.now_size-1)//最后一个结点
-              {
-                  if(it_leaf.next!=0)//保证后面有结点
-                  {
-                      offset=it_leaf.next;
-                      position=0;
-                  }
-                  else position++;
-              }
-              else
-                  position++;
-              return *this;
-          }
-      }
-      const_iterator operator--(int) {
-          iterator tmp=*this;
-          if(*this==what_tree->cbegin())//第一个数据
-          {
-              what_tree= nullptr;
-              offset=0;
-              position=0;
-              return tmp;
-          }
-          else
-          {
-              leaf_node tmp_leaf;
-              tmp_leaf=what_tree->read_leaf(offset,sizeof(leaf_node));
-              if(position==0)//节点的第一个数据
-              {
-                  offset=tmp_leaf.prev;
-                  if(offset==0)////////////////
-                      position--;
-                  else{leaf_node q;
-                      q=what_tree->read_leaf(tmp_leaf.prev,sizeof(leaf_node));
-                      position=q.now_size-1;}
-              }
-              else//正常情况
-                  position--;
-
-              return tmp;
-          }
-
-      }
-      const_iterator& operator--() {
-          if(*this==what_tree->cbegin())//第一个数据
-          {
-              what_tree= nullptr;
-              offset=0;
-              position=0;
-              return *this;
-          }
-          else {
-              leaf_node tmp_leaf;
-              tmp_leaf = what_tree->read_leaf(offset, sizeof(leaf_node));
-              if (position == 0)//节点的第一个数据
-              {
-                  offset = tmp_leaf.prev;
-                  if (offset == 0)/////////////////
-                      position--;
-                  else {
-                      leaf_node q;
-                      q = what_tree->read_leaf(tmp_leaf.prev, sizeof(leaf_node));
-                      position = q.now_size - 1;
-                  }
-              } else//正常情况
-                  position--;
-
-              return *this;
-          }
-      }
-      // Overloaded of operator '==' and '!='
-      // Check whether the iterators are same
-      value_type& operator*() const {////////////??????
-          // Todo operator*, return the <K,V> of iterator
-          leaf_node tmp;
-          tmp=what_tree->read_leaf(offset,sizeof(leaf_node));
-          return tmp.data[position].value;
-      }
-      bool operator==(const iterator& rhs) const {
-          return (position==rhs.position&&offset==rhs.offset&&what_tree==rhs.what_tree);
-      }
-      bool operator==(const const_iterator& rhs) const {
-          return (position==rhs.position&&offset==rhs.offset&&what_tree==rhs.what_tree);
-      }
-      bool operator!=(const iterator& rhs) const {
-          return (position!=rhs.position||offset!=rhs.offset||what_tree!=rhs.what_tree);
-      }
-      bool operator!=(const const_iterator& rhs) const {
-          return (position!=rhs.position||offset!=rhs.offset||what_tree!=rhs.what_tree);
-      }
-    // And other methods in iterator, please fill by yourself.
-  };
-  // Default Constructor and Copy Constructor
-  BTree() {
-    // Todo Default
-    open_file();
-    if(exists==0) build_bpt();
-  }
-  BTree(const BTree& other) {
-
-    // Todo Copy
-  }
-  BTree& operator=(const BTree& other) {
-    // Todo Assignment
-  }
-  ~BTree() {
-      close_file();
-    // Todo Destructor
-  }
-
-  void insert_node(const Key &key,offset_type offset,internal_node current_node)
-  {
-      int pos;
-      for(pos=0;pos<current_node.now_size;pos++)
-      {
-          if(key<current_node.data[pos].key)
-              break;
-      }
-      for(int i=current_node.now_size-1;i>=pos;i--)
-      {current_node.data[i+1].key=current_node.data[i].key;
-       current_node.data[i+1].offset=current_node.data[i].offset;
-      }
-      current_node.data[pos].offset=offset;
-      current_node.data[pos].key=key;
-      current_node.now_size++;
-      if(current_node.now_size<=M)
-          write_index(current_node.offset,sizeof(internal_node),current_node);
-      else split_node(current_node);
-  }
-
-    pair<iterator,OperationResult> insert_leaf(const Key &key,const Value &value,leaf_node &current_leaf)
-    {
-        int pos;
-        for(pos=0;pos<current_leaf.now_size;pos++)
-        {
-            if(key==current_leaf.data[pos].key)
-                return pair<iterator,OperationResult > (iterator(nullptr),Fail);
-            if(key<current_leaf.data[pos].key)
-                break;
-        }//找到添加的位置
-        for(int i=current_leaf.now_size-1;i>=pos;i--)
-        {
-            current_leaf.data[i+1].key=current_leaf.data[i].key;
-            current_leaf.data[i+1].value=current_leaf.data[i].value;
-        }//后移
-        current_leaf.now_size++;
-        saving.num_of_data++;
-        current_leaf.data[pos].value=value;
-        current_leaf.data[pos].key=key;
-
-        iterator it;
-        it.offset=current_leaf.offset;
-        it.position=pos;
-        write_index(off,sizeof(save),saving);
-        if(current_leaf.now_size<=L)
-            write_leaf(current_leaf.offset,sizeof(leaf_node),current_leaf);
-        else
-            split_leaf(current_leaf,it,key);
-        return pair<iterator,OperationResult> (it,Success);
-
-    }
-
-    void split_leaf(leaf_node current_leaf,iterator &it,Key key)
-    {
-      leaf_node new_leaf;
-      new_leaf.now_size=current_leaf.now_size/2;
-      current_leaf.now_size=current_leaf.now_size/2;
-      it.offset=new_leaf.offset=saving.eend;
-      saving.eend=saving.eed+new_leaf.offset;
-      new_leaf.father=current_leaf.father;
-      //移动
-      for(int i=0;i<new_leaf.now_size;++i)
-      {
-          new_leaf.data[i].value=current_leaf.data[i+current_leaf.now_size].value;
-          new_leaf.data[i].key=current_leaf.data[i+current_leaf.now_size].key;
-          if(new_leaf.data[i].key==key)
-          {
-              it.offset=new_leaf.offset;
-              it.position=i;
-          }
-      }
-
-      //新节点和之前的相关叶子节点进行连接
-      new_leaf.next=current_leaf.next;
-      new_leaf.prev=current_leaf.offset;
-      current_leaf.next=new_leaf.offset;//前驱后继的连接
-
-      leaf_node next_leaf;
-      if(new_leaf.next!=0)//后面有叶子,把后面的更新并写入
-      {
-          next_leaf=read_leaf(new_leaf.offset,sizeof(leaf_node));
-          next_leaf.prev=new_leaf.offset;
-          write_leaf(new_leaf.offset,sizeof(leaf_node),next_leaf);
-      }
-
-      //最后一个叶子了
-      if(saving.last_leaf==current_leaf.offset)
-          saving.last_leaf=new_leaf.offset;
-
-      //写入
-      write_leaf(new_leaf.offset,sizeof(leaf_node),new_leaf);
-      write_leaf(current_leaf.offset,sizeof(leaf_node),current_leaf);
-      write_index(off,sizeof(save),saving);
-
-      //更新父亲
-      internal_node father_node;
-      father_node=read_index(current_leaf.father,sizeof(internal_node));
-      insert_node(new_leaf.data[0].key,new_leaf.offset,father_node);
-
-    }
-
-    void split_node(internal_node &current_node)
-    {
-      internal_node new_node;
-      new_node.now_size=current_node.now_size/2;
-      current_node.now_size=current_node.now_size/2;
-      new_node.type=current_node.type;
-      new_node.offset=saving.eend;
-      new_node.father=current_node.father;
-      saving.eend+=sizeof(internal_node);
-      //复制关键字
-      for(int i=0;i<new_node.now_size;++i)
-      {new_node.data[i].offset=current_node.data[i+current_node.now_size].offset;
-       new_node.data[i].key=current_node.data[i+current_node.now_size].key;
-      }
-
-      //更新这个节点下的孩子的地址
-      leaf_node tmp_leaf;
-      internal_node tmp_node;
-      for(int i=0;i<new_node.now_size;++i)//检查它的孩子是叶子还是内部节点
-      {
-          if(new_node.type==1)
-          {//如果孩子是叶子结点，更新叶子节点的父亲，再写入
-              tmp_leaf=read_leaf(new_node.data[i].offset,sizeof(leaf_node));
-              tmp_leaf.father=new_node.offset;
-              write_leaf(tmp_leaf.offset,sizeof(leaf_node),tmp_leaf);
-          }
-          else
-          {//如果孩子不是叶子结点，更新内部结点的父亲，再写入
-              tmp_node=read_index(new_node.data[i].offset,sizeof(internal_node));
-              tmp_node.father=new_node.offset;
-              write_index(tmp_node.offset,sizeof(internal_node),tmp_node);
-          }
-      }
-
-      //结点是根的情况要单独考虑，重新生成一个根
-      if(current_node.offset==saving.root)
-      {
-          internal_node new_root;
-          new_root.offset=saving.eend;
-          saving.eend+=sizeof(internal_node);
-          new_root.father=0;
-          new_root.type=0;
-          new_root.now_size=2;
-          new_root.data[0].key=current_node.data[0].key;
-          new_root.data[1].key=current_node.data[1].key;
-          new_root.data[0].offset=current_node.data[0].offset;
-          new_root.data[1].offset=current_node.data[1].offset;
-
-          new_node.father=new_root.offset;
-          current_node.father=new_root.offset;//分裂的结点的父亲都是新的根
-
-          saving.root=new_root.offset;
-
-          //写入文件
-          write_index(current_node.offset,sizeof(internal_node),current_node);
-          write_index(new_node.offset,sizeof(internal_node),new_node);
-          write_index(new_root.offset,sizeof(internal_node),new_root);
-          write_index(off,sizeof(save),saving);
-
-      }
-      else//原来的结点不是根，正常写入，还要将这个插入父亲的结点里面
-      {
-          write_index(current_node.offset, sizeof(internal_node), current_node);
-          write_index(new_node.offset, sizeof(internal_node), new_node);
-          write_index(off, sizeof(save), saving);
-          //插入父亲的结点中
-          internal_node tmp_father;
-          tmp_father=read_index(current_node.offset,sizeof(internal_node));
-          insert_node(new_node.data[0].key,new_node.offset,tmp_father);
-      }
-    }
 
 
-  // Insert: Insert certain Key-Value into the database
-  // Return a pair, the first of the pair is the iterator point to the new
-  // element, the second of the pair is Success if it is successfully inserted
-  pair<iterator, OperationResult> insert(const Key& key, const Value& value) {
+        void split_node(internalNode &current_node) {
+            internalNode newnode;
+            newnode.cnt = current_node.cnt - (current_node.cnt /2);
+            current_node.cnt =current_node.cnt/2;
+            newnode.type = current_node.type;
+            newnode.father = current_node.father;
+            newnode.offset = saving. eend;
+            saving. eend += sizeof(internalNode);
+            //复制关键字
+            for (int i = 0; i < newnode.cnt; ++i)
+            {newnode.key[i] = current_node.key[i + current_node.cnt];
+             newnode.data[i] =current_node.data[i +current_node.cnt];
+            }
 
-    offset_type leaf_offset=find_location(key,saving.root);
-    leaf_node leaf;
-    if(saving.num_of_data==0||leaf_offset==0)//第一个数据或者是第一个叶子
-    {
-        leaf=read_leaf(saving.head,sizeof(leaf_node));
-        pair<iterator,OperationResult> p;
-        p=insert_leaf(key,value,leaf);////
-        if(p.second==Fail) return p;
-        offset_type offset=leaf.father;
-        internal_node node;
-        while(offset!=0)
-        {
-            node=read_index(offset,sizeof(internal_node));
-            node.data[0].key=key;
-            write_index(offset,sizeof(internal_node),node);
-            offset=node.father;
+            //更新这个结点下孩子的地址
+            leafNode tmp_leaf;
+            internalNode tmp_node;
+            for (int i = 0; i < newnode.cnt; ++i) {
+                if(newnode.type == 1) {  				// his child is leaf
+                    read_file(&tmp_leaf, newnode.data[i], 1, sizeof(leafNode));
+                    tmp_leaf.father = newnode.offset;
+                    write_file(&tmp_leaf, tmp_leaf.offset, 1, sizeof(leafNode));
+                } else {
+                    read_file(& tmp_node, newnode.data[i], 1, sizeof(internalNode));
+                    tmp_node.father = newnode.offset;
+                    write_file(& tmp_node, tmp_node.offset, 1, sizeof(internalNode));
+                }
+            }
+
+            //结点时根，需要重新生成根
+
+            if(current_node.offset == saving.root) {
+                internalNode new_root;
+                new_root.offset =saving. eend;
+                saving. eend += sizeof(internalNode);
+                new_root.father = 0;
+                new_root.type = 0;
+                new_root.cnt = 2;
+                new_root.key[0] = current_node.key[0];
+                new_root.data[0] = current_node.offset;
+                new_root.key[1] = newnode.key[0];
+                new_root.data[1] = newnode.offset;
+
+                current_node.father = new_root.offset;
+                newnode.father = new_root.offset;
+                saving.root = new_root.offset;//分裂的结点的父亲都是新根
+
+                //写入
+                write_file(&saving, off, 1, sizeof(savee));
+                write_file(&current_node, current_node.offset, 1, sizeof(internalNode));
+                write_file(&newnode, newnode.offset, 1, sizeof(internalNode));
+                write_file(&new_root, new_root.offset, 1, sizeof(internalNode));
+            } else {															// not root
+                write_file(&saving, off, 1, sizeof(savee));
+                write_file(&current_node, current_node.offset, 1, sizeof(internalNode));
+                write_file(&newnode, newnode.offset, 1, sizeof(internalNode));
+
+                internalNode tmp_father;
+                read_file(&tmp_father, current_node.father, 1, sizeof(internalNode));
+                insert_node(tmp_father, newnode.key[0], newnode.offset);
+            }
         }
-        return p;
-    }
-    leaf=read_index(leaf_offset,sizeof(leaf_node));
-    pair<iterator,OperationResult> p;
-    p=insert_leaf(key,value,leaf);
-    return p;
-  }
-  // Erase: Erase the Key-Value
-  // Return Success if it is successfully erased
-  // Return Fail if the key doesn't exist in the database
-  OperationResult erase(const Key& key) {
-    //TODO erase function
-    return Fail;  // If you can't finish erase part, just remaining here.
-  }
-  // Return a iterator to the beginning
-  iterator begin() {
-      return iterator(this,saving.first_leaf,0);
-  }
-  const_iterator cbegin() const {
-      return const_iterator(this,saving.first_leaf,0);
-  }
-  // Return a iterator to the end(the next element after the last)
-  iterator end() {
-      leaf_node last;
-      last=read_leaf(saving.last_leaf,sizeof(leaf_node));
-      int x=last.now_size;
-      return iterator(this,saving.last_leaf,x);
-  }
-  const_iterator cend() const {
-      leaf_node last;
-      last=read_leaf(saving.last_leaf,sizeof(leaf_node));
-      int x=last.now_size;
-      return const_iterator(this,saving.last_leaf,x);
-  }
-  // Check whether this BTree is empty
-  bool empty() const {
-      return saving.num_of_data==0;
-  }
-  // Return the number of <K,V> pairs
-  size_t size() const {
-      return saving.num_of_data;
-  }
-  // Clear the BTree
-  void clear() {
-      ffile.open("bpt",std::ios::binary);
-      ffile.close();
-      open_file();
-      build_bpt();
-  }
-  /**
-   * Returns the number of elements with key
-   *   that compares equivalent to the specified argument,
-   * The default method of check the equivalence is !(a < b || b > a)
-   */
-  size_t count(const Key& key) const {
-      return static_cast<size_t> (find(key)!=iterator(nullptr));
-  }
-  /**
-   * Finds an element with key equivalent to key.
-   * key value of the element to search for.
-   * Iterator to an element with key equivalent to key.
-   *   If no such element is found, past-the-end (see end()) iterator is
-   * returned.
-   */
-  iterator find(const Key& key) {
-      offset_type leaf_off=find_location(key,saving.root);
-      if(leaf_off==0)
-          return end();
-      leaf_node current_leaf;
-      current_leaf=read_leaf(leaf_off,sizeof(leaf_node));
-      int  i;
-      for(i=0;i<current_leaf.now_size;++i)
-      {
-          if(key==current_leaf.data[i].key)
-              return iterator(this,leaf_off,i);
-      }
-      if(i==current_leaf.now_size)
-          return end();
-  }
-  const_iterator find(const Key& key) const {
-      offset_type leaf_off=find_location(key,saving.root);
-      if(leaf_off==0)
-          return cend();
-      leaf_node current_leaf;
-      current_leaf=read_leaf(leaf_off,sizeof(leaf_node));
-      int  i;
-      for(i=0;i<current_leaf.now_size;++i)
-      {
-          if(key==current_leaf.data[i].key)
-              return const_iterator(this,leaf_off,i);
-      }
-      if(i==current_leaf.now_size)
-          return cend();
-  }
-};
+
+
+
+    public:
+        class iterator {
+            friend class BTree;
+        private:
+            offset_type offset;        // offset of the leaf node
+            int position;							// place of the element in the leaf node
+            BTree *what_tree;
+        public:
+            iterator() {
+                what_tree = nullptr;
+                position = 0;
+                offset = 0;
+            }
+            iterator(BTree *what, offset_type offs = 0, int pos = 0) {
+                what_tree = what;
+                offset = offs;  position = pos;
+            }
+            iterator(const iterator& other) {
+                what_tree = other.what_tree;
+                offset = other.offset;
+                position = other. position;
+            }
+            iterator(const const_iterator& other) {
+                what_tree = other.what_tree;
+                offset = other.offset;
+                position = other. position;
+            }
+
+            // to get the value type pointed by iterator.
+            Value getValue() {
+                leafNode p;
+                what_tree -> read_file(&p, offset, 1, sizeof(leafNode));
+                return p.data[ position].second;
+            }
+
+            OperationResult modify(const Value& value) {
+
+                return Success;
+            }
+
+            // Return a new iterator which points to the n-next elements
+            iterator operator++(int) {
+                iterator it = *this;
+                // 末尾
+                if(*this == what_tree -> end()) {
+                    what_tree = nullptr;  position = 0; offset = 0;
+                    return it;
+                }
+                leafNode p;
+                what_tree -> read_file(&p, offset, 1, sizeof(leafNode));
+                if( position == p.cnt - 1) {
+                    if(p.nxt == 0) ++  position;
+                    else {
+                        offset = p.nxt;
+                        position = 0;
+                    }
+                }
+                else ++  position;
+                return it;
+            }
+            iterator& operator++() {
+                if(*this == what_tree -> end()) {
+                    what_tree = nullptr;
+                    position = 0;
+                    offset = 0;
+                    return *this;
+                }
+                leafNode p;
+                what_tree -> read_file(&p, offset, 1, sizeof(leafNode));
+                if( position == p.cnt - 1) {
+                    if(p.nxt == 0) ++ position;
+                    else {
+                        offset = p.nxt;
+                        position = 0;
+                    }
+                }
+                else ++  position;
+                return *this;
+            }
+            iterator operator--(int) {
+                iterator it = *this;
+                if(*this == what_tree -> begin()) {
+                    what_tree = nullptr;
+                    position = 0;
+                    offset = 0;
+                    return it;
+                }
+                leafNode p;
+                what_tree -> read_file(&p, offset, 1, sizeof(leafNode));
+                if( position == 0) {
+                    offset = p.pre;
+                    leafNode q;
+                    what_tree -> readFile(&q, p.pre, 1, sizeof(leafNode));
+                    position = q.cnt - 1;
+                }
+                else --  position;
+                return it;
+            }
+            iterator& operator--() {
+                if(*this == what_tree -> begin()) {
+                    what_tree = nullptr;
+                    position = 0;
+                    offset = 0;
+                    return *this;
+                }
+                leafNode p;
+                what_tree -> read_file(&p, offset, 1, sizeof(leafNode));
+                if( position == 0) {
+                    offset = p.pre;
+                    leafNode q;
+                    what_tree -> read_file(&q, p.pre, 1, sizeof(leafNode));
+                    position = q.cnt - 1;
+                }
+                else --  position;
+                return *this;
+            }
+            bool operator==(const iterator& rhs) const {
+                return offset == rhs.offset &&  position == rhs. position && what_tree == rhs.what_tree;
+            }
+            bool operator==(const const_iterator& rhs) const {
+                return offset == rhs.offset &&  position == rhs. position && what_tree == rhs.what_tree;
+            }
+            bool operator!=(const iterator& rhs) const {
+                return offset != rhs.offset ||  position != rhs. position || what_tree != rhs.what_tree;
+            }
+            bool operator!=(const const_iterator& rhs) const {
+                return offset != rhs.offset ||  position != rhs. position || what_tree != rhs.what_tree;
+            }
+        };
+
+        class const_iterator {
+            friend class BTree;
+        private:
+            offset_type offset;        // offset of the leaf node
+            int position;							// place of the element in the leaf node
+            const BTree *what_tree;
+        public:
+            const_iterator() {
+                what_tree = nullptr;
+                position = 0, offset = 0;
+            }
+            const_iterator(const BTree *what,offset_type offs = 0, int pos = 0) {
+                what_tree = what;
+                offset = offs;  position = pos;
+            }
+            const_iterator(const iterator& other) {
+                what_tree = other.what_tree;
+                offset = other.offset;
+                position = other. position;
+            }
+            const_iterator(const const_iterator& other) {
+                what_tree = other.what_tree;
+                offset = other.offset;
+                position = other. position;
+            }
+            // to get the value type pointed by iterator.
+            Value getValue() {
+                leafNode p;
+                what_tree -> read_file(&p, offset, 1, sizeof(leafNode));
+                return p.data[ position].second;
+            }
+            // Return a new iterator which points to the n-next elements
+            const_iterator operator++(int) {
+                const_iterator it = *this;
+                //末尾
+                if(*this == what_tree -> cend()) {
+                    what_tree = nullptr;
+                    position = 0;
+                    offset = 0;
+                    return it;
+                }
+                leafNode p;
+                what_tree-> read_file(&p, offset, 1, sizeof(leafNode));
+                if( position == p.cnt - 1) {
+                    if(p.nxt == 0) ++ position;
+                    else {
+                        offset = p.nxt;
+                        position = 0;
+                    }
+                } else ++  position;
+                return it;
+            }
+            const_iterator& operator++() {
+                if(*this == what_tree -> cend()) {
+                    what_tree = nullptr;  position = 0; offset = 0;
+                    return *this;
+                }
+                leafNode p;
+                what_tree -> read_file(&p, offset, 1, sizeof(leafNode));
+                if( position == p.cnt - 1) {
+                    if(p.nxt == 0) ++  position;
+                    else {
+                        offset = p.nxt;
+                        position = 0;
+                    }
+                } else ++  position;
+                return *this;
+            }
+            const_iterator operator--(int) {
+                const_iterator it = *this;
+                if(*this == what_tree -> cbegin()) {
+                    what_tree = nullptr;
+                    position = 0;
+                    offset = 0;
+                    return it;
+                }
+                leafNode p, q;
+                what_tree -> read_file(&p, offset, 1, sizeof(leafNode));
+                if( position== 0) {
+                    offset = p.pre;
+                    what_tree -> read_file(&q, p.pre, 1, sizeof(leafNode));
+                    position = q.cnt - 1;
+                } else --  position;
+                return it;
+            }
+            const_iterator& operator--() {
+                if(*this == what_tree -> cbegin()) {
+                    what_tree = nullptr;
+                    position = 0;
+                    offset = 0;
+                    return *this;
+                }
+                leafNode p;
+                what_tree -> read_file(&p, offset, 1, sizeof(leafNode));
+                if( position == 0) {
+                    offset = p.pre;
+                    leafNode q;
+                    what_tree -> read_file(&q, p.pre, 1, sizeof(leafNode));
+                    position = q.cnt - 1;
+                } else --  position;
+                return *this;
+            }
+            bool operator==(const iterator& rhs) const {
+                return offset == rhs.offset &&  position == rhs. position && what_tree == rhs.what_tree;
+            }
+            bool operator==(const const_iterator& rhs) const {
+                return offset == rhs.offset &&  position == rhs. position && what_tree == rhs.what_tree;
+            }
+            bool operator!=(const iterator& rhs) const {
+                return offset != rhs.offset || position != rhs. position|| what_tree != rhs.what_tree;
+            }
+            bool operator!=(const const_iterator& rhs) const {
+                return offset != rhs.offset ||  position != rhs. position || what_tree != rhs.what_tree;
+            }
+        };
+
+        // Default Constructor and Copy Constructor
+
+        BTree() {
+            fp = nullptr;
+            openFile();
+            if (file_already_exists == 0) build_bpt();
+        }
+
+        BTree(const BTree& other) {
+
+        }
+
+        BTree& operator=(const BTree& other) {
+
+        }
+
+        ~BTree() {
+            closeFile();
+        }
+
+        /**
+         * Insert: Insert certain Key-Value into the database
+         * Return a pair, the first of the pair is the iterator point to the new
+         * element, the second of the pair is Success if it is successfully inserted
+         */
+        pair <iterator, OperationResult> insert(const Key& key, const Value& value) {
+            offset_type leaf_offset = find_location(key,saving.root);
+            leafNode leaf;
+            if(saving.size == 0 || leaf_offset == 0)//第一个数据或者第一个叶子
+            {
+                read_file(&leaf, saving.first_leaf, 1, sizeof(leafNode));
+                pair <iterator, OperationResult> p= insert_leaf(leaf, key, value);
+                if(p.second == Fail) return p;
+                offset_type offset = leaf.father;
+                internalNode node;
+                while(offset != 0) {
+                    read_file(&node, offset, 1, sizeof(internalNode));
+                    node.key[0] = key;
+                    write_file(&node, offset, 1, sizeof(internalNode));
+                    offset = node.father;
+                }
+                return p;
+            }
+            read_file(&leaf, leaf_offset, 1, sizeof(leafNode));
+            pair <iterator, OperationResult> p = insert_leaf(leaf, key, value);
+            return p;
+        }
+
+        /**
+         * Erase: Erase the Key-Value
+         * Return Success if it is successfully erased
+         * Return Fail if the key doesn't exist in the database
+         */
+        OperationResult erase(const Key& key) {
+            return Success;
+        }
+
+        // Return a iterator to the beginning
+        iterator begin() {
+            return iterator(this, saving.first_leaf, 0);
+        }
+        const_iterator cbegin() const {
+            return const_iterator(this, saving.first_leaf, 0);
+        }
+        // Return a iterator to the end(the next element after the last)
+        iterator end() {
+            leafNode last;
+            read_file(&last, saving.last_leaf, 1, sizeof(leafNode));
+            return iterator(this, saving.last_leaf, last.cnt);
+        }
+        const_iterator cend() const {
+            leafNode last;
+            read_file(&last, saving.last_leaf, 1, sizeof(leafNode));
+            return const_iterator(this, saving.last_leaf, last.cnt);
+        }
+        // Check whether this BTree is empty
+        bool empty() const
+        {return saving.size == 0;}
+        // Return the number of <K,V> pairs
+        size_t size() const
+        {return saving.size;}
+        // Clear the BTree
+        void clear() {
+            fp = fopen("bpt.txt", "w");
+            fclose(fp);
+            openFile();
+            build_bpt();
+        }
+        /**
+         * Returns the number of elements with key
+         *   that compares equivalent to the specified argument,
+         * The default method of check the equivalence is !(a < b || b > a)
+         */
+        size_t count(const Key& key) const {
+            return static_cast <size_t> (find(key) != iterator(nullptr));
+        }
+        Value at(const Key& key){
+            iterator it = find(key);
+            leafNode leaf;
+            if(it == end()) {
+                throw "fail!";
+            }
+            read_file(&leaf, it.offset, 1, sizeof(leafNode));
+            return leaf.data[it.position].second;
+        }
+        /**
+         * Finds an element with key equivalent to key.
+         * key value of the element to search for.
+         * Iterator to an element with key equivalent to key.
+         *   If no such element is found, past-the-end (see end()) iterator is
+         * returned.`
+         */
+        iterator find(const Key& key) {
+            offset_type leaf_off = find_location(key, saving.root);
+            if(leaf_off == 0) return end();
+            leafNode current_leaf;
+            read_file(&current_leaf, leaf_off, 1, sizeof(leafNode));
+            for (int i = 0; i < current_leaf.cnt; ++i)
+            {if (current_leaf.data[i].first == key)
+                    return iterator(this, leaf_off, i);
+            }
+            return end();
+        }
+        const_iterator find(const Key& key) const {
+            offset_type leaf_off = find_location(key);
+            if(leaf_off == 0) return cend();
+            leafNode current_leaf;
+            read_file(&current_leaf, leaf_off, 1, sizeof(leafNode));
+            for (int i = 0; i < current_leaf.cnt; ++i)
+                if (current_leaf.data[i].first == key) return const_iterator(this, leaf_off, i);
+            return cend();
+        }
+    };
 }  // namespace sjtu
